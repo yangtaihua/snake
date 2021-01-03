@@ -16,6 +16,7 @@
     },
     "dependencies": {
         "axios": "^0.19",
+        "buefy": "^0.9.4",
         "font-awesome": "^4.7.0",
         "lodash": "^4.17.19",
         "sweetalert2": "^10.12.7"
