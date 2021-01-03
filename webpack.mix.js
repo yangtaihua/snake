@@ -12,5 +12,5 @@ mix.setPublicPath("web")
  |
  */
 
-mix.js('resources/js/app.js', 'public/static/js');
+mix.copyDirectory('node_modules/sweetalert2/dist', 'web/vendor/sweetalert2');
 

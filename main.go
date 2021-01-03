@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
@@ -53,6 +54,7 @@ func main() {
 	// Create the Gin engine.
 	router := snake.App.Router
 
+	router.Use(static.ServeRoot("/", "web"))
 	// HealthCheck 健康检查路由
 	router.GET("/health", api.HealthCheck)
 	// metrics router 可以在 prometheus 中进行监控
