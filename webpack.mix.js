@@ -14,3 +14,4 @@ mix.setPublicPath("web")
 
 mix.copyDirectory('node_modules/sweetalert2/dist', 'web/vendor/sweetalert2');
 
+
