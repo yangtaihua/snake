@@ -66,6 +66,9 @@ func (c *redisCache) Get(key string, val interface{}) error {
 	if string(data) == "" {
 		return nil
 	}
+	if string(data) == NotFoundPlaceholder {
+		return ErrPlaceholder
+	}
 	err = Unmarshal(c.encoding, data, val)
 	if err != nil {
 		return errors.Wrapf(err, "unmarshal data error, key=%s, cacheKey=%s type=%v, json is %+v ",
@@ -194,4 +197,8 @@ func (c *redisCache) Decr(key string, step int64) (int64, error) {
 		return 0, errors.Wrapf(err, "redis incr, keys is %+v", key)
 	}
 	return affectRow, nil
+}
+
+func (c *redisCache) SetCacheWithNotFound(key string) error {
+	return c.client.Set(key, NotFoundPlaceholder, DefaultNotFoundExpireTime).Err()
 }

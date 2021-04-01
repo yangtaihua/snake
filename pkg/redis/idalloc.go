@@ -4,10 +4,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/1024casts/snake/pkg/conf"
+
 	"github.com/go-redis/redis"
 	"github.com/pkg/errors"
 
-	"github.com/1024casts/snake/pkg/conf"
 	"github.com/1024casts/snake/pkg/log"
 )
 

@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// WriterStdOut 标准输出
-	WriterStdOut = "stdout"
+	// WriterConsole console输出
+	WriterConsole = "console"
 	// WriterFile 文件输出
 	WriterFile = "file"
 )
@@ -27,102 +27,153 @@ const (
 	RotateTimeHourly = "hourly"
 )
 
+// For mapping config logger to app logger levels
+var loggerLevelMap = map[string]zapcore.Level{
+	"debug":  zapcore.DebugLevel,
+	"info":   zapcore.InfoLevel,
+	"warn":   zapcore.WarnLevel,
+	"error":  zapcore.ErrorLevel,
+	"dpanic": zapcore.DPanicLevel,
+	"panic":  zapcore.PanicLevel,
+	"fatal":  zapcore.FatalLevel,
+}
+
+func getLoggerLevel(cfg *Config) zapcore.Level {
+	level, exist := loggerLevelMap[cfg.Level]
+	if !exist {
+		return zapcore.DebugLevel
+	}
+
+	return level
+}
+
 // zapLogger logger struct
 type zapLogger struct {
-	sugaredLogger *zap.SugaredLogger
+	sugarLogger *zap.SugaredLogger
 }
 
 // newZapLogger new zap logger
-func newZapLogger(cfg *Config) (Logger, error) {
-	encoder := getJSONEncoder()
+func newZapLogger(cfg *Config) (*zap.Logger, error) {
+	return buildLogger(cfg), nil
+}
+
+// newLogger new logger
+func newLogger(cfg *Config) (Logger, error) {
+	return &zapLogger{sugarLogger: buildLogger(cfg).Sugar()}, nil
+}
+
+func buildLogger(cfg *Config) *zap.Logger {
+	var encoderCfg zapcore.EncoderConfig
+	if cfg.Development {
+		encoderCfg = zap.NewDevelopmentEncoderConfig()
+	} else {
+		encoderCfg = zap.NewProductionEncoderConfig()
+	}
+	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	var encoder zapcore.Encoder
+	if cfg.Encoding == WriterConsole {
+		encoder = zapcore.NewConsoleEncoder(encoderCfg)
+	} else {
+		encoder = zapcore.NewJSONEncoder(encoderCfg)
+	}
 
 	var cores []zapcore.Core
 	var options []zap.Option
-	// 设置初始化字段
-	option := zap.Fields(zap.String("ip", ip.GetLocalIP()), zap.String("app", cfg.Name))
+	// init option
+	hostname, _ := os.Hostname()
+	option := zap.Fields(
+		zap.String("ip", ip.GetLocalIP()),
+		zap.String("app_id", cfg.Name),
+		zap.String("instance_id", hostname),
+	)
 	options = append(options, option)
-
-	allLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl <= zapcore.FatalLevel
-	})
 
 	writers := strings.Split(cfg.Writers, ",")
 	for _, w := range writers {
-		if w == WriterStdOut {
-			core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel)
-			cores = append(cores, core)
-		}
-		if w == WriterFile {
-			infoFilename := cfg.LoggerFile
-			infoWrite := getLogWriterWithTime(cfg, infoFilename)
-			warnFilename := cfg.LoggerWarnFile
-			warnWrite := getLogWriterWithTime(cfg, warnFilename)
-			errorFilename := cfg.LoggerErrorFile
-			errorWrite := getLogWriterWithTime(cfg, errorFilename)
+		switch w {
+		case WriterConsole:
+			cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), getLoggerLevel(cfg)))
+		case WriterFile:
+			// info
+			cores = append(cores, getInfoCore(encoder, cfg))
 
-			infoLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-				return lvl <= zapcore.InfoLevel
-			})
-			warnLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-				stacktrace := zap.AddStacktrace(zapcore.WarnLevel)
-				options = append(options, stacktrace)
-				return lvl == zapcore.WarnLevel
-			})
-			errorLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-				stacktrace := zap.AddStacktrace(zapcore.ErrorLevel)
-				options = append(options, stacktrace)
-				return lvl >= zapcore.ErrorLevel
-			})
+			// warning
+			core, option := getWarnCore(encoder, cfg)
+			cores = append(cores, core)
+			if option != nil {
+				options = append(options, option)
+			}
 
-			core := zapcore.NewCore(encoder, zapcore.AddSync(infoWrite), infoLevel)
+			// error
+			core, option = getErrorCore(encoder, cfg)
 			cores = append(cores, core)
-			core = zapcore.NewCore(encoder, zapcore.AddSync(warnWrite), warnLevel)
-			cores = append(cores, core)
-			core = zapcore.NewCore(encoder, zapcore.AddSync(errorWrite), errorLevel)
-			cores = append(cores, core)
-		}
-		if w != WriterFile && w != WriterStdOut {
-			core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapcore.DebugLevel)
-			cores = append(cores, core)
-			allWriter := getLogWriterWithTime(cfg, cfg.LoggerFile)
-			core = zapcore.NewCore(encoder, zapcore.AddSync(allWriter), allLevel)
-			cores = append(cores, core)
+			if option != nil {
+				options = append(options, option)
+			}
+		default:
+			// console
+			cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), getLoggerLevel(cfg)))
+			// file
+			cores = append(cores, getAllCore(encoder, cfg))
 		}
 	}
 
 	combinedCore := zapcore.NewTee(cores...)
 
 	// 开启开发模式，堆栈跟踪
-	caller := zap.AddCaller()
-	options = append(options, caller)
-	// 开启文件及行号
-	development := zap.Development()
-	options = append(options, development)
+	if !cfg.DisableCaller {
+		caller := zap.AddCaller()
+		options = append(options, caller)
+	}
+
 	// 跳过文件调用层数
 	addCallerSkip := zap.AddCallerSkip(2)
 	options = append(options, addCallerSkip)
 
 	// 构造日志
-	logger := zap.New(combinedCore, options...).Sugar()
-
-	return &zapLogger{sugaredLogger: logger}, nil
+	return zap.New(combinedCore, options...)
 }
 
-// getJSONEncoder
-func getJSONEncoder() zapcore.Encoder {
-	encoderConfig := zapcore.EncoderConfig{
-		MessageKey:     "msg",
-		LevelKey:       "level",
-		TimeKey:        "time",
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		NameKey:        "app",
-		CallerKey:      "file",
-		StacktraceKey:  "trace",
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeDuration: zapcore.MillisDurationEncoder,
-	}
-	return zapcore.NewJSONEncoder(encoderConfig)
+func getAllCore(encoder zapcore.Encoder, cfg *Config) zapcore.Core {
+	allWriter := getLogWriterWithTime(cfg, cfg.LoggerFile)
+	allLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl <= zapcore.FatalLevel
+	})
+	return zapcore.NewCore(encoder, zapcore.AddSync(allWriter), allLevel)
+}
+
+func getInfoCore(encoder zapcore.Encoder, cfg *Config) zapcore.Core {
+	infoWrite := getLogWriterWithTime(cfg, cfg.LoggerFile)
+	infoLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl <= zapcore.InfoLevel
+	})
+	return zapcore.NewCore(encoder, zapcore.AddSync(infoWrite), infoLevel)
+}
+
+func getWarnCore(encoder zapcore.Encoder, cfg *Config) (zapcore.Core, zap.Option) {
+	warnWrite := getLogWriterWithTime(cfg, cfg.LoggerWarnFile)
+	var stacktrace zap.Option
+	warnLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		if !cfg.DisableCaller {
+			stacktrace = zap.AddStacktrace(zapcore.WarnLevel)
+		}
+		return lvl == zapcore.WarnLevel
+	})
+	return zapcore.NewCore(encoder, zapcore.AddSync(warnWrite), warnLevel), stacktrace
+}
+
+func getErrorCore(encoder zapcore.Encoder, cfg *Config) (zapcore.Core, zap.Option) {
+	errorFilename := cfg.LoggerErrorFile
+	errorWrite := getLogWriterWithTime(cfg, errorFilename)
+	var stacktrace zap.Option
+	errorLevel := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		if !cfg.DisableCaller {
+			stacktrace = zap.AddStacktrace(zapcore.ErrorLevel)
+		}
+		return lvl >= zapcore.ErrorLevel
+	})
+	return zapcore.NewCore(encoder, zapcore.AddSync(errorWrite), errorLevel), stacktrace
 }
 
 // getLogWriterWithTime 按时间(小时)进行切割
@@ -150,50 +201,50 @@ func getLogWriterWithTime(cfg *Config, filename string) io.Writer {
 
 // Debug logger
 func (l *zapLogger) Debug(args ...interface{}) {
-	l.sugaredLogger.Debug(args...)
+	l.sugarLogger.Debug(args...)
 }
 
 // Info logger
 func (l *zapLogger) Info(args ...interface{}) {
-	l.sugaredLogger.Info(args...)
+	l.sugarLogger.Info(args...)
 }
 
 // Warn logger
 func (l *zapLogger) Warn(args ...interface{}) {
-	l.sugaredLogger.Warn(args...)
+	l.sugarLogger.Warn(args...)
 }
 
 // Error logger
 func (l *zapLogger) Error(args ...interface{}) {
-	l.sugaredLogger.Error(args...)
+	l.sugarLogger.Error(args...)
 }
 
 func (l *zapLogger) Fatal(args ...interface{}) {
-	l.sugaredLogger.Fatal(args...)
+	l.sugarLogger.Fatal(args...)
 }
 
 func (l *zapLogger) Debugf(format string, args ...interface{}) {
-	l.sugaredLogger.Debugf(format, args...)
+	l.sugarLogger.Debugf(format, args...)
 }
 
 func (l *zapLogger) Infof(format string, args ...interface{}) {
-	l.sugaredLogger.Infof(format, args...)
+	l.sugarLogger.Infof(format, args...)
 }
 
 func (l *zapLogger) Warnf(format string, args ...interface{}) {
-	l.sugaredLogger.Warnf(format, args...)
+	l.sugarLogger.Warnf(format, args...)
 }
 
 func (l *zapLogger) Errorf(format string, args ...interface{}) {
-	l.sugaredLogger.Errorf(format, args...)
+	l.sugarLogger.Errorf(format, args...)
 }
 
 func (l *zapLogger) Fatalf(format string, args ...interface{}) {
-	l.sugaredLogger.Fatalf(format, args...)
+	l.sugarLogger.Fatalf(format, args...)
 }
 
 func (l *zapLogger) Panicf(format string, args ...interface{}) {
-	l.sugaredLogger.Panicf(format, args...)
+	l.sugarLogger.Panicf(format, args...)
 }
 
 func (l *zapLogger) WithFields(fields Fields) Logger {
@@ -202,6 +253,6 @@ func (l *zapLogger) WithFields(fields Fields) Logger {
 		f = append(f, k)
 		f = append(f, v)
 	}
-	newLogger := l.sugaredLogger.With(f...)
+	newLogger := l.sugarLogger.With(f...)
 	return &zapLogger{newLogger}
 }

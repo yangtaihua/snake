@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/ristretto"
-
 	"github.com/pkg/errors"
 
 	"github.com/1024casts/snake/pkg/log"
@@ -42,7 +41,7 @@ func (m *memoryCache) Set(key string, val interface{}, expiration time.Duration)
 	if err != nil {
 		return errors.Wrapf(err, "build cache key err, key is %+v", key)
 	}
-	m.Store.Set(cacheKey, buf, int64(expiration))
+	m.Store.SetWithTTL(cacheKey, buf, 0, expiration)
 	return nil
 }
 
@@ -55,6 +54,9 @@ func (m *memoryCache) Get(key string, val interface{}) error {
 	data, ok := m.Store.Get(cacheKey)
 	if !ok {
 		return nil
+	}
+	if data == NotFoundPlaceholder {
+		return ErrPlaceholder
 	}
 	err = Unmarshal(m.encoding, data.([]byte), val)
 	if err != nil {
@@ -98,4 +100,11 @@ func (m *memoryCache) Incr(key string, step int64) (int64, error) {
 // Decr 自减
 func (m *memoryCache) Decr(key string, step int64) (int64, error) {
 	panic("implement me")
+}
+
+func (m *memoryCache) SetCacheWithNotFound(key string) error {
+	if m.Store.Set(key, NotFoundPlaceholder, int64(DefaultNotFoundExpireTime)) {
+		return nil
+	}
+	return ErrSetMemoryWithNotFound
 }

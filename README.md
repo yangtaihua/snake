@@ -4,6 +4,7 @@
  [![codecov](https://codecov.io/gh/1024casts/snake/branch/master/graph/badge.svg)](https://codecov.io/gh/1024casts/snake)
  [![GolangCI](https://golangci.com/badges/github.com/golangci/golangci-lint.svg)](https://golangci.com)
  [![godoc](https://godoc.org/github.com/1024casts/snake?status.svg)](https://godoc.org/github.com/1024casts/snake)
+ <a href="http://opentracing.io"><img src="https://img.shields.io/badge/OpenTracing-enabled-blue.svg" alt="OpenTracing Badge"></a>
  [![Go Report Card](https://goreportcard.com/badge/github.com/1024casts/snake)](https://goreportcard.com/report/github.com/1024casts/snake)
  [![gitmoji](https://img.shields.io/badge/gitmoji-%20%F0%9F%98%9C%20%F0%9F%98%8D-FFDD67.svg?style=flat-square)](https://github.com/carloscuesta/gitmoji)
  [![License](https://img.shields.io/github/license/1024casts/snake?style=flat-square)](/LICENSE)
@@ -45,22 +46,25 @@
 
 ```shell
 ├── Makefile                     # 项目管理文件
+├── api                          # grpc客户端和Swagger 文档
 ├── build                        # 编译目录
 ├── cmd                          # 脚手架目录
-├── conf                         # 配置文件统一存放目录
-├── db.sql                       # 在部署新环境时，可以登录 MySQL 客户端，执行 source db.sql 创建数据库和表
-├── docs                         # Swagger 文档，执行 swag init 生成的
-├── handler                      # 控制器目录，用来读取输入、调用业务处理、返回结果
+├── config                       # 配置文件统一存放目录
+├── docs                         # 框架相关文档
 ├── internal                     # 业务目录
 │   ├── cache                    # 基于业务封装的cache
-│   ├── idl                      # 数据结构转换
+│   ├── handler                  # http 接口
+│   ├── middleware               # 自定义中间件
 │   ├── model                    # 数据库 model
-│   ├── repository               # 数据访问层
+│   ├── dao                      # 数据访问层
+│   ├── ecode                    # 业务自定义错误码
+│   ├── routers                  # 业务路由
+│   ├── server                   # http server 和 grpc server
 │   └── service                  # 业务逻辑层
 ├── logs                         # 存放日志的目录
 ├── main.go                      # 项目入口文件
-├── pkg                          # 一些封装好的 package
-├── router                       # 路由及中间件目录
+├── pkg                          # 公共的 package
+├── test                         # 单元测试依赖的配置文件，主要是供docker使用的一些环境配置文件
 └── scripts                      # 存放用于执行各种构建，安装，分析等操作的脚本
 ```
 
@@ -79,8 +83,9 @@ git clone https://github.com/1024casts/snake
 # 进入到下载目录
 cd snake
 
-# 生成本地环境配置文件
-cp config.sample.yaml config.local.yaml
+# 生成环境配置文件
+cd config
+cp config.local.yaml config.{ENV}.yaml
 
 # 编译
 make build
@@ -97,11 +102,14 @@ make build
 # 下载
 go get github.com/1024casts/snake/cmd/snake
 
-cd $GOPATH/src
+export GO111MODULE=on
+# 或者在.bashrc 或 .zshrc中加入
+# source .bashrc 或 source .zshrc
+
 # 使用
-snake new snake-demo -d ./
+snake new snake-demo 
 # 或者 
-snake new github.com/foo/bar -d ./
+snake new github.com/foo/bar
 ```
 
 ## 💻 常用命令
@@ -136,7 +144,7 @@ snake new github.com/foo/bar -d ./
 
 ## 开发规范
 
-遵循: [Uber Go 语言编码规范](https://github.com/xxjwxc/uber_go_guide_cn)
+遵循: [Uber Go 语言编码规范](https://github.com/uber-go/guide/blob/master/style.md)
 
 ## 📖 开发规约
 

@@ -6,12 +6,12 @@ import (
 	"github.com/qiniu/api.v7/storage"
 
 	"github.com/1024casts/snake/pkg/conf"
-	"github.com/1024casts/snake/pkg/constvar"
 )
 
 // GetDefaultAvatarURL 获取默认头像
 func GetDefaultAvatarURL() string {
-	return GetQiNiuPublicAccessURL(constvar.DefaultAvatar)
+	url := "/default/avatar.jpg"
+	return GetQiNiuPublicAccessURL(url)
 }
 
 // GetAvatarURL user's avatar, if empty, use default avatar

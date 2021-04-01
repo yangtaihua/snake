@@ -9,79 +9,110 @@
 package main
 
 import (
-	"github.com/gin-contrib/static"
-	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spf13/pflag"
-	"google.golang.org/grpc"
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/1024casts/snake/app/api"
-	rpc "github.com/1024casts/snake/internal/server"
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/pflag"
+	"github.com/uber/jaeger-lib/metrics"
+	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
+
+	"github.com/1024casts/snake/internal/conf"
+	"github.com/1024casts/snake/internal/model"
+	"github.com/1024casts/snake/internal/server/grpc"
+	http2 "github.com/1024casts/snake/internal/server/http"
 	"github.com/1024casts/snake/internal/service"
-	"github.com/1024casts/snake/pkg/conf"
-	"github.com/1024casts/snake/pkg/snake"
-	routers "github.com/1024casts/snake/router"
+	logger "github.com/1024casts/snake/pkg/log"
+	"github.com/1024casts/snake/pkg/net/tracing"
+	redis2 "github.com/1024casts/snake/pkg/redis"
 )
 
 var (
-	cfg = pflag.StringP("config", "c", "", "snake config file path.")
+	cfgFile = pflag.StringP("config", "c", "", "snake config file path.")
+	Cfg     *conf.Config
+	Svc     *service.Service
 )
+
+func init() {
+	pflag.Parse()
+	// init config
+	Cfg, err := conf.Init(*cfgFile)
+	if err != nil {
+		panic(err)
+	}
+	// init log
+	logger.InitLog(&Cfg.Logger)
+	// init db
+	model.Init(&Cfg.MySQL)
+	// init redis
+	redis2.Init(&Cfg.Redis)
+	// init tracer
+	metricsFactory := jprom.New().Namespace(metrics.NSOptions{Name: Cfg.App.Name, Tags: nil})
+	_, closer, err := tracing.Init(Cfg.Jaeger.ServiceName, Cfg.Jaeger.Host, metricsFactory)
+	if err != nil {
+		panic(err)
+	}
+	defer closer.Close()
+
+	// init service
+	Svc := service.New(Cfg)
+	_ = Svc
+}
 
 // @title snake docs api
 // @version 1.0
 // @description snake demo
 
-// @contact.name 1024casts/snake
-// @contact.url http://www.swagger.io/support
-// @contact.email
-
 // @host localhost:8080
 // @BasePath /v1
 func main() {
-	pflag.Parse()
-
-	// init config
-	if err := conf.Init(*cfg); err != nil {
-		panic(err)
-	}
-
-	// Set gin mode.
-	gin.SetMode(conf.Conf.App.RunMode)
-
-	// init app
-	snake.App = snake.New(conf.Conf)
-
-	// Create the Gin engine.
-	router := snake.App.Router
-
-	router.Use(static.ServeRoot("/", "web"))
-	// HealthCheck 健康检查路由
-	router.GET("/health", api.HealthCheck)
-	// metrics router 可以在 prometheus 中进行监控
-	// 通过 grafana 可视化查看 prometheus 的监控数据，使用插件6671查看
-	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
-
-	// API Routes.
-	routers.Load(router)
-	// WEB Routes
-	routers.LoadWebRouter(router)
-
-	// init service
-	svc := service.New(conf.Conf)
-
-	// set global service
-	service.Svc = svc
-	snake.App.BizService = svc
-
-	// start grpc server
-	var rpcSrv *grpc.Server
+	gin.SetMode(conf.Conf.App.Mode)
+	// init http server
+	httpSrv := http2.Init(Svc)
+	// init grpc server
+	grpcSrv := grpc.Init(Cfg, Svc)
+	// init pprof server
 	go func() {
-		rpcSrv = rpc.New(conf.Conf, svc)
-		snake.App.RPCServer = rpcSrv
+		fmt.Printf("Listening and serving PProf HTTP on %s\n", conf.Conf.App.PprofPort)
+		if err := http.ListenAndServe(conf.Conf.App.PprofPort, http.DefaultServeMux); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen ListenAndServe for PProf, err: %s", err.Error())
+		}
 	}()
 
-	// here register to service discovery
+	ctx, cancel := context.WithTimeout(context.Background(), conf.Conf.App.CtxDefaultTimeout*time.Second)
+	defer cancel()
 
-	// start server
-	snake.App.Run()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
+	for {
+		s := <-quit
+		log.Printf("Server receive a quit signal: %s", s.String())
+		switch s {
+		case syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT:
+			log.Println("Server is exiting")
+			// close http server
+			if httpSrv != nil {
+				if err := httpSrv.Shutdown(ctx); err != nil {
+					log.Fatalf("Server shutdown err: %s", err)
+				}
+			}
+			// close grpc server
+			if grpcSrv != nil {
+				grpcSrv.GracefulStop()
+			}
+			// close service
+			Svc.Close()
+			return
+		case syscall.SIGHUP:
+			// TODO: reload
+		default:
+			return
+		}
+	}
 }

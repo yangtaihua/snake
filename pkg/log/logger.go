@@ -1,67 +1,81 @@
 package log
 
-import "errors"
+import (
+	"context"
+	"fmt"
+)
 
-// A global variable so that log functions can be directly accessed
+// log is A global variable so that log functions can be directly accessed
 var log Logger
+
+// logger is A global variable with trace log
+var logger Factory
 
 // Fields Type to pass when we want to call WithFields for structured logging
 type Fields map[string]interface{}
 
-const (
-	// InstanceZapLogger zap logger
-	InstanceZapLogger int = iota
-	// here add other logger
-)
+// Logger config
+type Config struct {
+	Development       bool
+	DisableCaller     bool
+	DisableStacktrace bool
+	Encoding          string
+	Level             string
+	Name              string
+	Writers           string
+	LoggerFile        string
+	LoggerWarnFile    string
+	LoggerErrorFile   string
+	LogFormatText     bool
+	LogRollingPolicy  string
+	LogRotateDate     int
+	LogRotateSize     int
+	LogBackupCount    uint
+}
 
-var (
-	errInvalidLoggerInstance = errors.New("invalid logger instance")
-)
+// InitLog init log
+func InitLog(cfg *Config) Logger {
+	zapLogger, err := newZapLogger(cfg)
+	if err != nil {
+		fmt.Errorf("Init newZapLogger err: %v", err)
+	}
+	l, err := newLogger(cfg)
+	if err != nil {
+		fmt.Errorf("Init newLogger err: %v", err)
+	}
+
+	// init logger with trace log
+	logger = NewFactory(zapLogger, l)
+
+	// normal log
+	log = l
+
+	return log
+}
 
 // Logger is our contract for the logger
 type Logger interface {
 	Debug(args ...interface{})
-	Info(args ...interface{})
-	Warn(args ...interface{})
-	Error(args ...interface{})
-	Fatal(args ...interface{})
 	Debugf(format string, args ...interface{})
+	Info(args ...interface{})
 	Infof(format string, args ...interface{})
+	Warn(args ...interface{})
 	Warnf(format string, args ...interface{})
+	Error(args ...interface{})
 	Errorf(format string, args ...interface{})
+	Fatal(args ...interface{})
 	Fatalf(format string, args ...interface{})
 	Panicf(format string, args ...interface{})
 	WithFields(keyValues Fields) Logger
 }
 
-// Config is the struct for logger information
-type Config struct {
-	Name             string `yaml:"name"`
-	Writers          string `yaml:"writers"`
-	LoggerLevel      string `yaml:"logger_level"`
-	LoggerFile       string `yaml:"logger_file"`
-	LoggerWarnFile   string `yaml:"logger_warn_file"`
-	LoggerErrorFile  string `yaml:"logger_error_file"`
-	LogFormatText    bool   `yaml:"log_format_text"`
-	LogRollingPolicy string `yaml:"log_rolling_policy"`
-	LogRotateDate    int    `yaml:"log_rotate_date"`
-	LogRotateSize    int    `yaml:"log_rotate_size"`
-	LogBackupCount   uint   `yaml:"log_backup_count"`
+func GetLogger() Logger {
+	return log
 }
 
-// NewLogger returns an instance of logger
-func NewLogger(cfg *Config, loggerInstance int) error {
-	switch loggerInstance {
-	case InstanceZapLogger:
-		logger, err := newZapLogger(cfg)
-		if err != nil {
-			return err
-		}
-		log = logger
-		return nil
-	default:
-		return errInvalidLoggerInstance
-	}
+// Trace is a logger that can log msg and log span for trace
+func Trace(ctx context.Context) Logger {
+	return logger.For(ctx)
 }
 
 // Debug logger
