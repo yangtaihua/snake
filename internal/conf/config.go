@@ -38,6 +38,7 @@ type Config struct {
 // AppConfig app config
 type AppConfig struct {
 	Name              string
+	ServerRoot        string
 	Version           string
 	Mode              string
 	Port              string

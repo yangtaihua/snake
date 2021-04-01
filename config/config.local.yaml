@@ -1,6 +1,6 @@
 app:
   Name: snake
-  Root: web
+  Root: public
   Version: 1.0.0
   Port: :8080
   PprofPort: :5555

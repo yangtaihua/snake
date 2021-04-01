@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"github.com/1024casts/snake/internal/conf"
 	"html/template"
 	"time"
 
@@ -27,7 +28,7 @@ func LoadWebRouter(g *gin.Engine) *gin.Engine {
 		web.Error404(c)
 	})
 
-	router.Use(static.Serve("/static", static.LocalFile("./static", false)))
+	router.Use(static.ServeRoot("/", conf.Conf.App.ServerRoot))
 
 	//new template engine
 	router.HTMLRender = gintemplate.New(gintemplate.TemplateConfig{
