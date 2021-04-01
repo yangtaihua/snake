@@ -1,7 +1,8 @@
 package seeders
 
-import "github.com/jinzhu/gorm"
+import "github.com/1024casts/snake/internal/model"
 
-func SysTreeSeeder(db gorm.DB) {
+func SysTreeSeeder() {
+	db := model.GetDB()
 	db.AutoMigrate()
 }
